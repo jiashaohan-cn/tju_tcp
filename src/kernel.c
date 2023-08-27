@@ -166,3 +166,47 @@ int cal_hash(uint32_t local_ip, uint16_t local_port, uint32_t remote_ip, uint16_
     // 实际上肯定不是这么算的
     return ((int)local_ip+(int)local_port+(int)remote_ip+(int)remote_port)%MAX_SOCK;
 }
+
+/*
+-------自定义函数--------
+*/
+tju_tcp_t* get_from_accept(){   // 从全连接队列中取出socket
+    tju_tcp_t* ret;
+    for (int i=0;i<MAX_SOCK;i++){
+        if (accept_queue[i]!=NULL){
+            ret=accept_queue[i];
+            accept_queue[i]=NULL;
+            return ret;
+        }
+        i%=MAX_SOCK-1;
+    }
+}
+void en_syn_queue(tju_tcp_t* sock){ // 将socket加入半连接队列（阻塞执行）
+    for (int i=0;i<MAX_SOCK;i++){
+        if (syn_queue[i]==NULL){
+            syn_queue[i]=sock;
+            return;
+        }
+        i%=MAX_SOCK-1;
+    }
+}
+void en_accept_queue(tju_tcp_t* sock){  // 将socket加入全连接队列（阻塞执行）
+    for (int i=0;i<MAX_SOCK;i++){
+        if (accept_queue[i]==NULL){
+            accept_queue[i]=sock;
+            return;
+        }
+        i%=MAX_SOCK-1;
+    }
+}
+tju_tcp_t* get_from_syn(){  // 从半连接队列中取出socket
+    tju_tcp_t* ret;
+    for (int i=0;i<MAX_SOCK;i++){
+        if (syn_queue[i]!=NULL){
+            ret=syn_queue[i];
+            syn_queue[i]=NULL;
+            return ret;
+        }
+        i%=MAX_SOCK-1;
+    }
+}

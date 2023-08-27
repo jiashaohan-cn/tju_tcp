@@ -55,30 +55,17 @@ int tju_listen(tju_tcp_t* sock){
 因为只要该函数返回, 用户就可以马上使用该socket进行send和recv
 */
 tju_tcp_t* tju_accept(tju_tcp_t* listen_sock){
+    
+    // 判断全连接队列中是否有 socket
+    tju_tcp_t* accept_socket=get_from_accept();     // 队列为空 阻塞
+
     tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
-    memcpy(new_conn, listen_sock, sizeof(tju_tcp_t));
-
-    tju_sock_addr local_addr, remote_addr;
-    /*
-     这里涉及到TCP连接的建立
-     正常来说应该是收到客户端发来的SYN报文
-     从中拿到对端的IP和PORT
-     换句话说 下面的处理流程其实不应该放在这里 应该在tju_handle_packet中
-    */ 
-    remote_addr.ip = inet_network("172.17.0.2");  //具体的IP地址
-    remote_addr.port = 5678;  //端口
-
-    local_addr.ip = listen_sock->bind_addr.ip;  //具体的IP地址
-    local_addr.port = listen_sock->bind_addr.port;  //端口
-
-    new_conn->established_local_addr = local_addr;
-    new_conn->established_remote_addr = remote_addr;
-
-    // 这里应该是经过三次握手后才能修改状态为ESTABLISHED
-    new_conn->state = ESTABLISHED;
+    memcpy(new_conn, accept_socket, sizeof(tju_tcp_t));
+    free(accept_socket);
 
     // 将新的conn放到内核建立连接的socket哈希表中
-    int hashval = cal_hash(local_addr.ip, local_addr.port, remote_addr.ip, remote_addr.port);
+    int hashval = cal_hash(new_conn->established_local_addr.ip, new_conn->established_local_addr.port, \
+                new_conn->established_remote_addr.ip, new_conn->established_remote_addr.port);
     established_socks[hashval] = new_conn;
 
     // 如果new_conn的创建过程放到了tju_handle_packet中 那么accept怎么拿到这个new_conn呢
@@ -98,18 +85,24 @@ tju_tcp_t* tju_accept(tju_tcp_t* listen_sock){
 */
 int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
 
-    sock->established_remote_addr = target_addr;
-
+    // 将socket绑定本地地址
     tju_sock_addr local_addr;
     local_addr.ip = inet_network("172.17.0.2");
     local_addr.port = 5678; // 连接方进行connect连接的时候 内核中是随机分配一个可用的端口
     sock->established_local_addr = local_addr;
 
-    // 这里也不能直接建立连接 需要经过三次握手
-    // 实际在linux中 connect调用后 会进入一个while循环
-    // 循环跳出的条件是socket的状态变为ESTABLISHED 表面看上去就是 正在连接中 阻塞
-    // 而状态的改变在别的地方进行 在我们这就是tju_handle_packet
-    sock->state = ESTABLISHED;
+    // 向客户端发送 SYN 报文，并将状态改为 SYN_SENT
+    uint32_t seq=CLIENT_ISN;
+    char* packet_SYN=create_packet_buf(local_addr.port,target_addr.port,seq,0,\
+            DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,SYN_FLAG_MASK,1,0,NULL,0);
+    sendToLayer3(packet_SYN,DEFAULT_HEADER_LEN);
+    sock->state=SYN_SENT;
+
+    // 阻塞等待
+    while (sock->state!=ESTABLISHED) ;
+    
+    // 三次握手完成
+    sock->established_remote_addr = target_addr;    // 绑定远端地址
 
     // 将建立了连接的socket放入内核 已建立连接哈希表中
     int hashval = cal_hash(local_addr.ip, local_addr.port, target_addr.ip, target_addr.port);
@@ -168,7 +161,43 @@ int tju_recv(tju_tcp_t* sock, void *buffer, int len){
 
 int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     
+    // 判断收到报文的 socket 的状态是否为 SYN_SENT
+    if (sock->state==SYN_SENT){
+        if (get_flags(pkt)==ACK_FLAG_MASK&&get_ack(pkt)==CLIENT_ISN+1){
+            char* packet_SYN_ACK2=create_packet_buf(get_dst(pkt),get_src(pkt),get_ack(pkt),get_seq(pkt)+1,\
+                        DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
+            sendToLayer3(packet_SYN_ACK2,DEFAULT_HEADER_LEN);
+            sock->state=ESTABLISHED;
+        }
+    }
+    else if (sock->state==LISTEN){
+        if (get_flags(pkt)==SYN_FLAG_MASK){
+            // 将 socket 存入半连接队列中
+            tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
+            memcpy(new_conn, sock, sizeof(tju_tcp_t));
+            new_conn->state=SYN_RECV;
+            en_syn_queue(new_conn);
+
+            // 向客户端发送 SYN_ACK 报文
+            char* packet_SYN_ACK1=create_packet_buf(get_dst(pkt),get_src(pkt),SERVER_ISN,get_seq(pkt)+1,\
+                        DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
+            sendToLayer3(packet_SYN_ACK1,DEFAULT_HEADER_LEN);
+        }
+        else if (get_flags(pkt)==ACK_FLAG_MASK&&get_ack(pkt)==SERVER_ISN+1){
+            // 取出半连接中的socket加入全连接队列中
+            tju_tcp_t* tmp_conn=get_from_syn();
+
+            tmp_conn->established_local_addr=tmp_conn->bind_addr;
+            tmp_conn->established_remote_addr.ip=inet_network("172.17.0.2");
+            tmp_conn->established_remote_addr.port=get_src(pkt);
+            tmp_conn->state=ESTABLISHED;
+
+            en_accept_queue(tmp_conn);
+        }
+    }
+    
     uint32_t data_len = get_plen(pkt) - DEFAULT_HEADER_LEN;
+    if (data_len==0) return 0;
 
     // 把收到的数据放到接受缓冲区
     while(pthread_mutex_lock(&(sock->recv_lock)) != 0); // 加锁

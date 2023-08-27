@@ -11,6 +11,17 @@ tju_tcp_t* listen_socks[MAX_SOCK];
 tju_tcp_t* established_socks[MAX_SOCK];
 
 /*
+-------自定义-------
+*/
+tju_tcp_t* syn_queue[MAX_SOCK];     // 半连接队列
+tju_tcp_t* accept_queue[MAX_SOCK];  // 全连接队列
+
+void en_syn_queue(tju_tcp_t* sock);   // 将socket加入半连接队列（阻塞执行）
+tju_tcp_t* get_from_syn();    // 从半连接队列中取出socket
+void en_accept_queue(tju_tcp_t* sock);  // 将socket加入全连接队列（阻塞执行）
+tju_tcp_t* get_from_accept();       // 从全连接队列中取出socket
+
+/*
 模拟Linux内核收到一份TCP报文的处理函数
 */
 void onTCPPocket(char* pkt);

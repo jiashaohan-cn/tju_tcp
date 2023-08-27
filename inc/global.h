@@ -16,6 +16,10 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 
+// 初始化序列号(随机)
+#define SERVER_ISN 0
+#define CLIENT_ISN 4
+
 // 单位是byte
 #define SIZE32 4
 #define SIZE16 2
