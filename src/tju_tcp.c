@@ -98,15 +98,15 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     sendToLayer3(packet_SYN,DEFAULT_HEADER_LEN);
     sock->state=SYN_SENT;
 
+    // 将即将建立连接的socket放入内核 已建立连接哈希表中
+    int hashval = cal_hash(local_addr.ip, local_addr.port, target_addr.ip, target_addr.port);
+    established_socks[hashval] = sock;
+
     // 阻塞等待
     while (sock->state!=ESTABLISHED) ;
     
     // 三次握手完成
     sock->established_remote_addr = target_addr;    // 绑定远端地址
-
-    // 将建立了连接的socket放入内核 已建立连接哈希表中
-    int hashval = cal_hash(local_addr.ip, local_addr.port, target_addr.ip, target_addr.port);
-    established_socks[hashval] = sock;
 
     return 0;
 }
