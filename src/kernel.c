@@ -170,43 +170,68 @@ int cal_hash(uint32_t local_ip, uint16_t local_port, uint32_t remote_ip, uint16_
 /*
 -------自定义函数--------
 */
+void init_queue(){      // 初始化
+    for (int i=0;i<MAX_SOCK;i++){
+        syn_queue[i]=accept_queue[i]=NULL;
+    }
+    syn_num=accept_num=0;
+    // 初始化互斥锁
+    pthread_mutex_init(&(syn_lock),NULL);
+    pthread_mutex_init(&(accept_lock),NULL);
+}
 tju_tcp_t* get_from_accept(){   // 从全连接队列中取出socket
+    while (accept_num==0) ;
     tju_tcp_t* ret;
+    // 加锁
+    pthread_mutex_lock(&accept_lock);
     for (int i=0;i<MAX_SOCK;i++){
         if (accept_queue[i]!=NULL){
             ret=accept_queue[i];
             accept_queue[i]=NULL;
+            accept_num--;
+            // 解锁
+            pthread_mutex_unlock(&accept_lock);
             return ret;
         }
-        i%=MAX_SOCK-1;
     }
+    pthread_mutex_unlock(&accept_lock);
 }
-void en_syn_queue(tju_tcp_t* sock){ // 将socket加入半连接队列（阻塞执行）
+void en_syn_queue(tju_tcp_t* sock){ // 将socket加入半连接队列
+    pthread_mutex_lock(&syn_lock);
     for (int i=0;i<MAX_SOCK;i++){
         if (syn_queue[i]==NULL){
             syn_queue[i]=sock;
+            syn_num++;
+            pthread_mutex_unlock(&syn_lock);
             return;
         }
         i%=MAX_SOCK-1;
     }
 }
-void en_accept_queue(tju_tcp_t* sock){  // 将socket加入全连接队列（阻塞执行）
+void en_accept_queue(tju_tcp_t* sock){  // 将socket加入全连接队列
+    pthread_mutex_lock(&accept_lock);
     for (int i=0;i<MAX_SOCK;i++){
         if (accept_queue[i]==NULL){
             accept_queue[i]=sock;
+            accept_num++;
+            pthread_mutex_unlock(&accept_lock);
             return;
         }
         i%=MAX_SOCK-1;
     }
 }
 tju_tcp_t* get_from_syn(){  // 从半连接队列中取出socket
+    while (syn_num==0) ;
     tju_tcp_t* ret;
+    pthread_mutex_lock(&syn_lock);
     for (int i=0;i<MAX_SOCK;i++){
         if (syn_queue[i]!=NULL){
             ret=syn_queue[i];
             syn_queue[i]=NULL;
+            syn_num--;
+            pthread_mutex_unlock(&syn_lock);
             return ret;
         }
-        i%=MAX_SOCK-1;
     }
+    pthread_mutex_unlock(&syn_lock);
 }

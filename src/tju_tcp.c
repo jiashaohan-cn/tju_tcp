@@ -42,6 +42,9 @@ int tju_bind(tju_tcp_t* sock, tju_sock_addr bind_addr){
 注册该socket到内核的监听socket哈希表
 */
 int tju_listen(tju_tcp_t* sock){
+    // 初始化半连接和全连接队列
+    init_queue();
+
     sock->state = LISTEN;
     int hashval = cal_hash(sock->bind_addr.ip, sock->bind_addr.port, 0, 0);
     listen_socks[hashval] = sock;
@@ -57,7 +60,9 @@ int tju_listen(tju_tcp_t* sock){
 tju_tcp_t* tju_accept(tju_tcp_t* listen_sock){
     
     // 判断全连接队列中是否有 socket
+    printf("开始监听全连接队列\n");
     tju_tcp_t* accept_socket=get_from_accept();     // 队列为空 阻塞
+    printf("从全连接队列中取出一个sock\n");
 
     tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
     memcpy(new_conn, accept_socket, sizeof(tju_tcp_t));
@@ -72,6 +77,7 @@ tju_tcp_t* tju_accept(tju_tcp_t* listen_sock){
     // 在linux中 每个listen socket都维护一个已经完成连接的socket队列
     // 每次调用accept 实际上就是取出这个队列中的一个元素
     // 队列为空,则阻塞 
+    printf("服务器三次握手完成\n");
     return new_conn;
 }
 
@@ -97,6 +103,7 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
             DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,SYN_FLAG_MASK,1,0,NULL,0);
     sendToLayer3(packet_SYN,DEFAULT_HEADER_LEN);
     sock->state=SYN_SENT;
+    printf("客户端发送SYN---第一次握手\n");
 
     // 将即将建立连接的socket放入内核 已建立连接哈希表中
     int hashval = cal_hash(local_addr.ip, local_addr.port, target_addr.ip, target_addr.port);
@@ -107,7 +114,8 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     
     // 三次握手完成
     sock->established_remote_addr = target_addr;    // 绑定远端地址
-
+    
+    printf("客户端三次握手完成\n");
     return 0;
 }
 
@@ -163,11 +171,12 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
     
     // 判断收到报文的 socket 的状态是否为 SYN_SENT
     if (sock->state==SYN_SENT){
-        if (get_flags(pkt)==ACK_FLAG_MASK&&get_ack(pkt)==CLIENT_ISN+1){
+        if (get_ack(pkt)==CLIENT_ISN+1){
             char* packet_SYN_ACK2=create_packet_buf(get_dst(pkt),get_src(pkt),get_ack(pkt),get_seq(pkt)+1,\
                         DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
             sendToLayer3(packet_SYN_ACK2,DEFAULT_HEADER_LEN);
             sock->state=ESTABLISHED;
+            printf("客户端发送SYN_ACK----第三次握手\n");
         }
     }
     else if (sock->state==LISTEN){
@@ -177,15 +186,18 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             memcpy(new_conn, sock, sizeof(tju_tcp_t));
             new_conn->state=SYN_RECV;
             en_syn_queue(new_conn);
+            printf("sock进半连接队列\n");
 
             // 向客户端发送 SYN_ACK 报文
             char* packet_SYN_ACK1=create_packet_buf(get_dst(pkt),get_src(pkt),SERVER_ISN,get_seq(pkt)+1,\
-                        DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
+                        DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,SYN_FLAG_MASK|ACK_FLAG_MASK,1,0,NULL,0);
             sendToLayer3(packet_SYN_ACK1,DEFAULT_HEADER_LEN);
+            printf("服务器发送SYN_ACK----第二次握手\n");
         }
         else if (get_flags(pkt)==ACK_FLAG_MASK&&get_ack(pkt)==SERVER_ISN+1){
             // 取出半连接中的socket加入全连接队列中
             tju_tcp_t* tmp_conn=get_from_syn();
+            printf("从半连接队列中取出sock\n");
 
             tmp_conn->established_local_addr=tmp_conn->bind_addr;
             tmp_conn->established_remote_addr.ip=inet_network(CLIENT_IP);
@@ -193,20 +205,23 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             tmp_conn->state=ESTABLISHED;
 
             en_accept_queue(tmp_conn);
+            printf("sock加入全连接队列\n");
         }
     }
     else if (sock->state==ESTABLISHED){
-        if (get_flags(pkt)==FIN_FLAG_MASK){
+        if (get_flags(pkt)==(FIN_FLAG_MASK|ACK_FLAG_MASK)){
             // 发送FIN_ACK报文
-            char* packet_FIN_ACK=create_packet_buf(get_dst(pkt),get_src(pkt),0,get_seq(pkt)+1,\
+            char* packet_FIN_ACK=create_packet_buf(get_dst(pkt),get_src(pkt),get_ack(pkt),get_seq(pkt)+1,\
                     DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
             sendToLayer3(packet_FIN_ACK,DEFAULT_HEADER_LEN);
+            printf("发送FIN_ACK报文\n");
 
             // 更新状态
             sock->state=CLOSE_WAIT;
             sleep(1);          // 等待，防止混入 同时关闭 的情况
 
             // 调用close
+            printf("调用tju_close函数\n");
             tju_close(sock);
         }
     }
@@ -214,9 +229,9 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         if (get_flags(pkt)==ACK_FLAG_MASK&&get_ack(pkt)==FIN_SEQ+1){    // 双方先后关闭
             sock->state=FIN_WAIT_2;
         }
-        else if (get_flags(pkt)==FIN_FLAG_MASK){    // 同时关闭
+        else if (get_flags(pkt)==(FIN_FLAG_MASK|ACK_FLAG_MASK)){    // 同时关闭
             // 发送FIN_ACK报文
-            char* packet_FIN_ACK3=create_packet_buf(get_dst(pkt),get_src(pkt),0,get_seq(pkt)+1,\
+            char* packet_FIN_ACK3=create_packet_buf(get_dst(pkt),get_src(pkt),get_ack(pkt),get_seq(pkt)+1,\
                     DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
             sendToLayer3(packet_FIN_ACK3,DEFAULT_HEADER_LEN);
 
@@ -225,7 +240,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         }
     }
     else if (sock->state==FIN_WAIT_2){
-        if (get_flags(pkt)==FIN_FLAG_MASK){
+        if (get_flags(pkt)==(FIN_FLAG_MASK|ACK_FLAG_MASK)){
             // 发送FIN_ACK报文
             char* packet_FIN_ACK2=create_packet_buf(get_dst(pkt),get_src(pkt),get_ack(pkt),get_seq(pkt)+1,\
                     DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
@@ -273,8 +288,9 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
 int tju_close (tju_tcp_t* sock){
     // 发送FIN报文
     char* packet_FIN=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,FIN_SEQ,\
-                    0,DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,FIN_FLAG_MASK,1,0,NULL,0);
+                    0,DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,FIN_FLAG_MASK|ACK_FLAG_MASK,1,0,NULL,0);
     sendToLayer3(packet_FIN,DEFAULT_HEADER_LEN);
+    printf("tju_close函数发送FIN报文\n");
 
     // 状态更新
     if (sock->state==ESTABLISHED){  // 主动调用
@@ -285,8 +301,10 @@ int tju_close (tju_tcp_t* sock){
     }
 
     // 阻塞等待
+    printf("等待中......\n");
     while (sock->state!=CLOSED) ;
 
+    printf("连接关闭\n");
     // 释放资源
     free(sock);
     return 0;

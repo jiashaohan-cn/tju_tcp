@@ -14,11 +14,16 @@ tju_tcp_t* established_socks[MAX_SOCK];
 -------自定义-------
 */
 tju_tcp_t* syn_queue[MAX_SOCK];     // 半连接队列
+uint16_t syn_num;       // 半连接队列元素个数
+pthread_mutex_t syn_lock; // 锁
 tju_tcp_t* accept_queue[MAX_SOCK];  // 全连接队列
+uint16_t accept_num;    // 全连接队列元素个数
+pthread_mutex_t accept_lock;
 
-void en_syn_queue(tju_tcp_t* sock);   // 将socket加入半连接队列（阻塞执行）
+void init_queue();    // 初始化
+void en_syn_queue(tju_tcp_t* sock);   // 将socket加入半连接队列
 tju_tcp_t* get_from_syn();    // 从半连接队列中取出socket
-void en_accept_queue(tju_tcp_t* sock);  // 将socket加入全连接队列（阻塞执行）
+void en_accept_queue(tju_tcp_t* sock);  // 将socket加入全连接队列
 tju_tcp_t* get_from_accept();       // 从全连接队列中取出socket
 
 /*
