@@ -87,7 +87,7 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
 
     // 将socket绑定本地地址
     tju_sock_addr local_addr;
-    local_addr.ip = inet_network("172.17.0.2");
+    local_addr.ip = inet_network(CLIENT_IP);
     local_addr.port = 5678; // 连接方进行connect连接的时候 内核中是随机分配一个可用的端口
     sock->established_local_addr = local_addr;
 
@@ -188,7 +188,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             tju_tcp_t* tmp_conn=get_from_syn();
 
             tmp_conn->established_local_addr=tmp_conn->bind_addr;
-            tmp_conn->established_remote_addr.ip=inet_network("172.17.0.2");
+            tmp_conn->established_remote_addr.ip=inet_network(CLIENT_IP);
             tmp_conn->established_remote_addr.port=get_src(pkt);
             tmp_conn->state=ESTABLISHED;
 

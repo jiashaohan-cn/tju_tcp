@@ -10,7 +10,7 @@ int main(int argc, char **argv) {
     // printf("my_tcp state %d\n", my_socket->state);
     
     tju_sock_addr target_addr;
-    target_addr.ip = inet_network("172.17.0.3");
+    target_addr.ip = inet_network(SERVER_IP);
     target_addr.port = 1234;
 
     tju_connect(my_socket, target_addr);

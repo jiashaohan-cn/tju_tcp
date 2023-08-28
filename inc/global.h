@@ -16,6 +16,9 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 
+#define SERVER_IP "172.17.0.3"
+#define CLIENT_IP "172.17.0.2"
+
 // 初始化序列号(随机)----三次挥手建立连接使用
 #define SERVER_ISN 0
 #define CLIENT_ISN 4
