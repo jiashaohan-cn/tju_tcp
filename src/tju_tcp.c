@@ -195,6 +195,60 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             en_accept_queue(tmp_conn);
         }
     }
+    else if (sock->state==ESTABLISHED){
+        if (get_flags(pkt)==FIN_FLAG_MASK){
+            // 发送FIN_ACK报文
+            char* packet_FIN_ACK=create_packet_buf(get_dst(pkt),get_src(pkt),0,get_seq(pkt)+1,\
+                    DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
+            sendToLayer3(packet_FIN_ACK,DEFAULT_HEADER_LEN);
+
+            // 更新状态
+            sock->state=CLOSE_WAIT;
+            sleep(1);          // 等待，防止混入 同时关闭 的情况
+
+            // 调用close
+            tju_close(sock);
+        }
+    }
+    else if (sock->state==FIN_WAIT_1){
+        if (get_flags(pkt)==ACK_FLAG_MASK&&get_ack(pkt)==FIN_SEQ+1){    // 双方先后关闭
+            sock->state=FIN_WAIT_2;
+        }
+        else if (get_flags(pkt)==FIN_FLAG_MASK){    // 同时关闭
+            // 发送FIN_ACK报文
+            char* packet_FIN_ACK3=create_packet_buf(get_dst(pkt),get_src(pkt),0,get_seq(pkt)+1,\
+                    DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
+            sendToLayer3(packet_FIN_ACK3,DEFAULT_HEADER_LEN);
+
+            // 状态更新
+            sock->state=CLOSING;
+        }
+    }
+    else if (sock->state==FIN_WAIT_2){
+        if (get_flags(pkt)==FIN_FLAG_MASK){
+            // 发送FIN_ACK报文
+            char* packet_FIN_ACK2=create_packet_buf(get_dst(pkt),get_src(pkt),get_ack(pkt),get_seq(pkt)+1,\
+                    DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
+            sendToLayer3(packet_FIN_ACK2,DEFAULT_HEADER_LEN);
+
+            // 更新socket状态并等待2MSL
+            sock->state=TIME_WAIT;
+            sleep(10);
+            sock->state=CLOSED;
+        }
+    }
+    else if (sock->state==LAST_ACK){
+        if (get_flags(pkt)==ACK_FLAG_MASK&&get_ack(pkt)==FIN_SEQ+1){
+            sock->state=CLOSED;
+        }
+    }
+    else if (sock->state==CLOSING){
+        if (get_flags(pkt)==ACK_FLAG_MASK&&get_ack(pkt)==FIN_SEQ+1){
+            sock->state=TIME_WAIT;
+            sleep(10);          // 等待2MSL
+            sock->state=CLOSED;
+        }
+    }
     
     uint32_t data_len = get_plen(pkt) - DEFAULT_HEADER_LEN;
     if (data_len==0) return 0;
@@ -217,5 +271,23 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
 }
 
 int tju_close (tju_tcp_t* sock){
+    // 发送FIN报文
+    char* packet_FIN=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,FIN_SEQ,\
+                    0,DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,FIN_FLAG_MASK,1,0,NULL,0);
+    sendToLayer3(packet_FIN,DEFAULT_HEADER_LEN);
+
+    // 状态更新
+    if (sock->state==ESTABLISHED){  // 主动调用
+        sock->state=FIN_WAIT_1;
+    }
+    else if (sock->state==CLOSE_WAIT){  // 被动调用
+        sock->state=LAST_ACK;
+    }
+
+    // 阻塞等待
+    while (sock->state!=CLOSED) ;
+
+    // 释放资源
+    free(sock);
     return 0;
 }

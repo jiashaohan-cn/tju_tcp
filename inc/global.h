@@ -16,9 +16,12 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 
-// 初始化序列号(随机)
+// 初始化序列号(随机)----三次挥手建立连接使用
 #define SERVER_ISN 0
 #define CLIENT_ISN 4
+
+// 关闭连接序列号（随机）----四次挥手关闭连接使用
+#define FIN_SEQ 23
 
 // 单位是byte
 #define SIZE32 4
