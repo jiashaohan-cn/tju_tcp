@@ -119,7 +119,7 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
 
     // 阻塞等待（简单计时器）
     while (sock->state!=ESTABLISHED){
-        if ((clock()-time_point)/CLOCKS_PER_SEC>=1){    //触发计时器--超时重传
+        if ((clock()-time_point)>=1000){    //触发计时器--超时重传
             sendToLayer3(packet_SYN,DEFAULT_HEADER_LEN);
             printf("客户端重新发送SYN请求----第一次握手\n");
             time_point=clock(); //重新开始计时
@@ -308,6 +308,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
 }
 
 int tju_close (tju_tcp_t* sock){
+    clock_t time_point;     //计时用
     // 发送FIN报文
     char* packet_FIN=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,FIN_SEQ,\
                     0,DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,FIN_FLAG_MASK|ACK_FLAG_MASK,1,0,NULL,0);
@@ -322,9 +323,17 @@ int tju_close (tju_tcp_t* sock){
         sock->state=LAST_ACK;
     }
 
-    // 阻塞等待
+    // 阻塞等待（支持超时重传）
+    char hostname[8];
+    gethostname(hostname, 8);
     printf("等待中......\n");
-    while (sock->state!=CLOSED) ;
+    while (sock->state!=CLOSED){
+        if ((clock()-time_point)>=1700){
+            sendToLayer3(packet_FIN,DEFAULT_HEADER_LEN);
+            printf("%s 超时重传FIN\n",hostname);
+            time_point=clock();
+        }
+    }
 
     printf("连接关闭\n");
     // 释放资源
