@@ -64,9 +64,7 @@ tju_tcp_t* tju_accept(tju_tcp_t* listen_sock){
     tju_tcp_t* accept_socket=get_from_accept();     // 队列为空 阻塞
     printf("从全连接队列中取出一个sock\n");
 
-    tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
-    memcpy(new_conn, accept_socket, sizeof(tju_tcp_t));
-    free(accept_socket);
+    tju_tcp_t* new_conn = accept_socket;
 
     // 将新的conn放到内核建立连接的socket哈希表中
     int hashval = cal_hash(new_conn->established_local_addr.ip, new_conn->established_local_addr.port, \
