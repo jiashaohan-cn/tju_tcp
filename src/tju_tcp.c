@@ -189,24 +189,32 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             // 将 socket 存入半连接队列中
             tju_tcp_t* new_conn = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
             memcpy(new_conn, sock, sizeof(tju_tcp_t));
+            // 绑定地址
+            new_conn->established_local_addr=new_conn->bind_addr;
+            new_conn->established_remote_addr.ip=inet_network(CLIENT_IP);
+            new_conn->established_remote_addr.port=get_src(pkt);
+
             new_conn->state=SYN_RECV;
-            en_syn_queue(new_conn);
-            printf("sock进半连接队列\n");
 
             // 向客户端发送 SYN_ACK 报文
             char* packet_SYN_ACK1=create_packet_buf(get_dst(pkt),get_src(pkt),SERVER_ISN,get_seq(pkt)+1,\
                         DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,SYN_FLAG_MASK|ACK_FLAG_MASK,1,0,NULL,0);
             sendToLayer3(packet_SYN_ACK1,DEFAULT_HEADER_LEN);
             printf("服务器发送SYN_ACK----第二次握手\n");
+            
+            // 该sock加入半连接队列
+            en_syn_queue(new_conn);
+            printf("sock进半连接队列\n");
         }
         else if (get_flags(pkt)==ACK_FLAG_MASK&&get_ack(pkt)==SERVER_ISN+1){
             // 取出半连接中的socket加入全连接队列中
-            tju_tcp_t* tmp_conn=get_from_syn();
+            tju_tcp_t* tmp_conn=get_from_syn(pkt);
             printf("从半连接队列中取出sock\n");
+            if (tmp_conn==NULL){
+                printf("半连接队列中已不存在该sock\n");
+                return 0;
+            }
 
-            tmp_conn->established_local_addr=tmp_conn->bind_addr;
-            tmp_conn->established_remote_addr.ip=inet_network(CLIENT_IP);
-            tmp_conn->established_remote_addr.port=get_src(pkt);
             tmp_conn->state=ESTABLISHED;
 
             en_accept_queue(tmp_conn);
