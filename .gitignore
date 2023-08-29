@@ -1,3 +1,4 @@
 # 忽略程序生成的中间文件
 build/
 test/
+.vscode/

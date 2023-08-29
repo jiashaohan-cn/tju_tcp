@@ -90,6 +90,7 @@ tju_tcp_t* tju_accept(tju_tcp_t* listen_sock){
 int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
 
     // 将socket绑定本地地址
+    clock_t time_point;     // 计时用
     tju_sock_addr local_addr;
     local_addr.ip = inet_network(CLIENT_IP);
     local_addr.port = 5678; // 连接方进行connect连接的时候 内核中是随机分配一个可用的端口
@@ -100,6 +101,7 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     char* packet_SYN=create_packet_buf(local_addr.port,target_addr.port,seq,0,\
             DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,SYN_FLAG_MASK,1,0,NULL,0);
     sendToLayer3(packet_SYN,DEFAULT_HEADER_LEN);
+    time_point=clock();  // 开始计时
     sock->state=SYN_SENT;
     printf("客户端发送SYN---第一次握手\n");
 
@@ -107,8 +109,13 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     int hashval = cal_hash(local_addr.ip, local_addr.port, target_addr.ip, target_addr.port);
     established_socks[hashval] = sock;
 
-    // 阻塞等待
-    while (sock->state!=ESTABLISHED) ;
+    // 阻塞等待（简单计时器）
+    while (sock->state!=ESTABLISHED){
+        if ((clock()-time_point)/CLOCKS_PER_SEC>=1){    //触发计时器--超时重传
+            sendToLayer3(packet_SYN,DEFAULT_HEADER_LEN);
+            time_point=clock(); //重新开始计时
+        }
+    }
     
     // 三次握手完成
     sock->established_remote_addr = target_addr;    // 绑定远端地址
