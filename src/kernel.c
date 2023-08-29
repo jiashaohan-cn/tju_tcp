@@ -173,6 +173,7 @@ int cal_hash(uint32_t local_ip, uint16_t local_port, uint32_t remote_ip, uint16_
 void init_queue(){      // 初始化
     for (int i=0;i<MAX_SOCK;i++){
         syn_queue[i].sock=accept_queue[i]=NULL;
+        syn_queue[i].packet_SYN_ACK=NULL;
     }
     syn_num=accept_num=0;
 }
@@ -188,7 +189,7 @@ tju_tcp_t* get_from_accept(){   // 从全连接队列中取出socket
         }
     }
 }
-void en_syn_queue(tju_tcp_t* sock){ // 将socket加入半连接队列
+void en_syn_queue(tju_tcp_t* sock, char* pkt){ // 将socket加入半连接队列
     int hashval;
     hashval=cal_hash(sock->established_local_addr.ip,sock->established_local_addr.port,\
                 sock->established_remote_addr.ip,sock->established_remote_addr.port);
@@ -196,6 +197,7 @@ void en_syn_queue(tju_tcp_t* sock){ // 将socket加入半连接队列
         syn_queue[hashval].sock=sock;
         syn_queue[hashval].last_ack_time=clock();
         syn_queue[hashval].remands=SYN_DEFAULT_REMANDS;
+        syn_queue[hashval].packet_SYN_ACK=pkt;
         syn_num++;
     }
     else{
@@ -229,10 +231,36 @@ tju_tcp_t* get_from_syn(char* pkt){  // 从半连接队列中取出socket
     if (syn_queue[hashval].sock!=NULL){
         ret=syn_queue[hashval].sock;
         syn_queue[hashval].sock=NULL;
+        free(syn_queue[hashval].packet_SYN_ACK);
+        syn_queue[hashval].packet_SYN_ACK=NULL;
         syn_num--;
         return ret;
     }
     else{
         return NULL;
+    }
+}
+void* syn_retrans_thread(void* arg){       // 半连接队列维护线程
+    printf("syn队列维护线程正在运行\n");
+    for (int i=0;i<MAX_SOCK;i++){
+        if (syn_queue[i].sock!=NULL){
+            // 检查该sock是否过期
+            if (syn_queue[i].remands>0){
+                if ((clock()-syn_queue[i].last_ack_time)/CLOCKS_PER_SEC>=1){
+                    // 超时
+                    sendToLayer3(syn_queue[i].packet_SYN_ACK,DEFAULT_HEADER_LEN);
+                    syn_queue[i].last_ack_time=clock(); // 重新计时
+                    syn_queue[i].remands--;
+                }
+            }
+            else{
+                // 过期，丢掉该sock
+                free(syn_queue[i].sock);
+                syn_queue[i].sock=NULL;
+                free(syn_queue[i].packet_SYN_ACK);
+                syn_queue[i].packet_SYN_ACK=NULL;
+            }
+        }
+        if (i==MAX_SOCK-1) i=0; // 循环
     }
 }

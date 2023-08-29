@@ -4,7 +4,8 @@
 #include "global.h"
 #include "tju_packet.h"
 #include "kernel.h"
-#include <time.h>
+// #include <time.h>
+// #include <pthread.h>
 
 /*
 创建 TCP socket 

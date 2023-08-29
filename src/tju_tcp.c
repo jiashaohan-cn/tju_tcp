@@ -44,6 +44,14 @@ int tju_bind(tju_tcp_t* sock, tju_sock_addr bind_addr){
 int tju_listen(tju_tcp_t* sock){
     // 初始化半连接和全连接队列
     init_queue();
+    // 开启半连接队列维护线程
+    pthread_t id;
+    int rst=pthread_create(&id,NULL,syn_retrans_thread,NULL);
+    if (rst<0){
+        printf("ERROR open 半连接队列维护线程\n");
+        exit(-1); 
+    }
+    printf("成功打开半连接队列维护线程\n");
 
     sock->state = LISTEN;
     int hashval = cal_hash(sock->bind_addr.ip, sock->bind_addr.port, 0, 0);
@@ -113,6 +121,7 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     while (sock->state!=ESTABLISHED){
         if ((clock()-time_point)/CLOCKS_PER_SEC>=1){    //触发计时器--超时重传
             sendToLayer3(packet_SYN,DEFAULT_HEADER_LEN);
+            printf("客户端重新发送SYN请求----第一次握手\n");
             time_point=clock(); //重新开始计时
         }
     }
@@ -203,7 +212,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             printf("服务器发送SYN_ACK----第二次握手\n");
             
             // 该sock加入半连接队列
-            en_syn_queue(new_conn);
+            en_syn_queue(new_conn,packet_SYN_ACK1);
             printf("sock进半连接队列\n");
         }
         else if (get_flags(pkt)==ACK_FLAG_MASK&&get_ack(pkt)==SERVER_ISN+1){

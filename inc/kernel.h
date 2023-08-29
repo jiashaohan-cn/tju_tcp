@@ -18,6 +18,7 @@ typedef struct
   tju_tcp_t* sock;
   clock_t last_ack_time;  // 超时重传用
   uint16_t remands;   // 剩余发送次数
+  char* packet_SYN_ACK; // 指向待发送SYN_ACK报文
 } syn_elem;    // 半连接队列元素结构体
 
 #define SYN_DEFAULT_REMANDS 5     // 半连接队列中syn_ack初始化发送次数
@@ -28,10 +29,12 @@ tju_tcp_t* accept_queue[MAX_SOCK];  // 全连接队列
 uint16_t accept_num;    // 全连接队列元素个数
 
 void init_queue();    // 初始化
-void en_syn_queue(tju_tcp_t* sock);   // 将socket加入半连接队列
+void en_syn_queue(tju_tcp_t* sock, char* pkt);   // 将socket加入半连接队列
 tju_tcp_t* get_from_syn(char* pkt);    // 从半连接队列中取出socket
 void en_accept_queue(tju_tcp_t* sock);  // 将socket加入全连接队列
 tju_tcp_t* get_from_accept();       // 从全连接队列中取出socket
+
+void* syn_retrans_thread(void* arg);    // 半连接队列维护线程（包括超时重传）
 
 /*
 模拟Linux内核收到一份TCP报文的处理函数
