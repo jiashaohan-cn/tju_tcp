@@ -124,6 +124,8 @@ typedef struct {
 
 	window_t window; // 发送和接受窗口
 
+	char* packet_FIN;	// FIN或FIN_ACK包
+
 } tju_tcp_t;
 
 #endif

@@ -176,23 +176,31 @@ void init_queue(){      // 初始化
         syn_queue[i].packet_SYN_ACK=NULL;
     }
     syn_num=accept_num=0;
+    // 初始化锁
+    pthread_mutex_init(&(syn_queue_lock), NULL);
+    pthread_mutex_init(&(accept_queue_lock), NULL);
 }
 tju_tcp_t* get_from_accept(){   // 从全连接队列中取出socket
     while (accept_num==0) ;
     tju_tcp_t* ret;
+    pthread_mutex_lock(&(accept_queue_lock));
     for (int i=0;i<MAX_SOCK;i++){
         if (accept_queue[i]!=NULL){
             ret=accept_queue[i];
             accept_queue[i]=NULL;
             accept_num--;
+            pthread_mutex_unlock(&(accept_queue_lock));
             return ret;
         }
     }
+    pthread_mutex_unlock(&(accept_queue_lock));
+    return NULL;
 }
 void en_syn_queue(tju_tcp_t* sock, char* pkt){ // 将socket加入半连接队列
     int hashval;
     hashval=cal_hash(sock->established_local_addr.ip,sock->established_local_addr.port,\
                 sock->established_remote_addr.ip,sock->established_remote_addr.port);
+    pthread_mutex_lock(&(syn_queue_lock));
     if (syn_queue[hashval].sock==NULL){
         syn_queue[hashval].sock=sock;
         syn_queue[hashval].last_ack_time=clock();
@@ -203,11 +211,13 @@ void en_syn_queue(tju_tcp_t* sock, char* pkt){ // 将socket加入半连接队列
     else{
         printf("该socket已在半连接队列中\n");
     }
+    pthread_mutex_unlock(&(syn_queue_lock));
 }
 void en_accept_queue(tju_tcp_t* sock){  // 将socket加入全连接队列
     int hashval;
     hashval=cal_hash(sock->established_local_addr.ip,sock->established_local_addr.port,\
                 sock->established_remote_addr.ip,sock->established_remote_addr.port);
+    pthread_mutex_lock(&(accept_queue_lock));
     if (accept_queue[hashval]==NULL){
         accept_queue[hashval]=sock;
         accept_num++;
@@ -215,9 +225,12 @@ void en_accept_queue(tju_tcp_t* sock){  // 将socket加入全连接队列
     else{
         printf("该socket已在全连接队列中\n");
     }
+    pthread_mutex_unlock(&(accept_queue_lock));
 }
 tju_tcp_t* get_from_syn(char* pkt){  // 从半连接队列中取出socket
+    pthread_mutex_lock(&(syn_queue_lock));
     if (syn_num==0){    // 半连接队列为空
+        pthread_mutex_unlock(&(syn_queue_lock));
         return NULL;
     }
     tju_tcp_t* ret;
@@ -234,23 +247,29 @@ tju_tcp_t* get_from_syn(char* pkt){  // 从半连接队列中取出socket
         free(syn_queue[hashval].packet_SYN_ACK);
         syn_queue[hashval].packet_SYN_ACK=NULL;
         syn_num--;
-        return ret;
     }
     else{
-        return NULL;
+        ret=NULL;
     }
+    pthread_mutex_unlock(&(syn_queue_lock));
+    return ret;
 }
+// 测试平台用不了
 void* syn_retrans_thread(void* arg){       // 半连接队列维护线程
-    printf("syn队列维护线程正在运行\n");
     for (int i=0;i<MAX_SOCK;i++){
+        pthread_mutex_lock(&(syn_queue_lock));
         if (syn_queue[i].sock!=NULL){
             // 检查该sock是否过期
             if (syn_queue[i].remands>0){
                 if ((clock()-syn_queue[i].last_ack_time)/CLOCKS_PER_SEC>=1){
                     // 超时
-                    sendToLayer3(syn_queue[i].packet_SYN_ACK,DEFAULT_HEADER_LEN);
+                    char *packet_SYN_ACK=(char *)malloc(DEFAULT_HEADER_LEN*sizeof(char));
+                    memcpy(packet_SYN_ACK,syn_queue[i].packet_SYN_ACK,DEFAULT_HEADER_LEN);
+                    sendToLayer3(packet_SYN_ACK,DEFAULT_HEADER_LEN);
+                    free(packet_SYN_ACK);
                     syn_queue[i].last_ack_time=clock(); // 重新计时
                     syn_queue[i].remands--;
+                    printf("半连接队列：超时重传\n");
                 }
             }
             else{
@@ -259,8 +278,13 @@ void* syn_retrans_thread(void* arg){       // 半连接队列维护线程
                 syn_queue[i].sock=NULL;
                 free(syn_queue[i].packet_SYN_ACK);
                 syn_queue[i].packet_SYN_ACK=NULL;
+                printf("半连接队列：过期，丢弃该sock\n");
             }
         }
-        if (i==MAX_SOCK-1) i=0; // 循环
+        pthread_mutex_unlock(&(syn_queue_lock));
+        if (i==MAX_SOCK-1){
+            i=0;
+            // sleep(1);
+        }
     }
 }

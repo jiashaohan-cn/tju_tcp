@@ -4,8 +4,6 @@
 #include "global.h"
 #include "tju_packet.h"
 #include "kernel.h"
-#include <time.h>
-// #include <pthread.h>
 
 /*
 创建 TCP socket 
@@ -53,6 +51,8 @@ int tju_recv (tju_tcp_t* sock, void *buffer, int len);
 */
 int tju_close (tju_tcp_t* sock);
 
+// 服务器用于关闭某个socket所用的线程
+void* tju_close_thread(void* arg);
 
 int tju_handle_packet(tju_tcp_t* sock, char* pkt);
 #endif
