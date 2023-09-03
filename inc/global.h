@@ -26,6 +26,11 @@
 // 关闭连接序列号（随机）----四次挥手关闭连接使用
 #define FIN_SEQ 0
 
+// 重传线程信号
+bool RETRANS;
+// 超时标志
+bool TIMEOUT_FLAG;
+
 // 单位是byte
 #define SIZE32 4
 #define SIZE16 2
@@ -41,6 +46,10 @@
 // 定义最大包长 防止IP层分片
 #define MAX_DLEN 1375 	// 最大包内数据长度
 #define MAX_LEN 1400 	// 最大包长度
+// 最大窗口大小
+#define MAX_WINDOW_SIZE 32*MAX_DLEN // 比如最多放32个满载数据包
+// 最大发送和接收缓冲区大小
+#define MAX_SOCK_BUF_SIZE 5000*MAX_LEN	// 发送缓冲区和接收缓冲区的大小至少为 5000 个 MSS
 
 // TCP socket 状态定义
 #define CLOSED 0
@@ -60,36 +69,34 @@
 #define CONGESTION_AVOIDANCE 1
 #define FAST_RECOVERY 2
 
-// TCP 接受窗口大小
-#define TCP_RECVWN_SIZE 32*MAX_DLEN // 比如最多放32个满载数据包
-
 // TCP 发送窗口
 // 注释的内容如果想用就可以用 不想用就删掉 仅仅提供思路和灵感
 typedef struct {
-	uint16_t window_size;
-
-//   uint32_t base;
-//   uint32_t nextseq;
-//   uint32_t estmated_rtt;
-//   int ack_cnt;
+	uint16_t window_size;	// 当前发送窗口大小
+	uint32_t ack_cnt;		// 缓冲区中已确认的字节数
+  	uint32_t base;		// 发送窗口起始位置序号
+    uint32_t nextseq;   // 下一个待发送序号
+	uint32_t same_ack_cnt;	// 连续重复ack数量
+	uint64_t estmated_rtt;	// 期望 RTT
+	uint64_t dev_rtt;		// 方差 RTT
+	bool is_estmating_rtt;	// 是否在测量 SampleRTT
+	uint32_t rtt_expect_ack;	// 用来测量RTT的报文期待的ACK号
 //   pthread_mutex_t ack_cnt_lock;
-//   struct timeval send_time;
-//   struct timeval timeout;
-//   uint16_t rwnd; 
-//   int congestion_status;
-//   uint16_t cwnd; 
-//   uint16_t ssthresh; 
+  	struct timeval send_time;	// 记录发送时间
+  	struct timeval timeout;		// 记录超时重传间隔
+  	uint16_t rwnd; 		// 发送端接收窗口大小
+  	int window_status;	// 该窗口拥塞控制状态
+  	uint16_t ssthresh; 	// 拥塞阈值
 } sender_window_t;
 
 // TCP 接受窗口
 // 注释的内容如果想用就可以用 不想用就删掉 仅仅提供思路和灵感
 typedef struct {
-	char received[TCP_RECVWN_SIZE];
-
+// char received[TCP_RECVWN_SIZE];
 //   received_packet_t* head;
 //   char buf[TCP_RECVWN_SIZE];
 //   uint8_t marked[TCP_RECVWN_SIZE];
-//   uint32_t expect_seq;
+  	uint32_t expect_seq;
 } receiver_window_t;
 
 // TCP 窗口 每个建立了连接的TCP都包括发送和接受两个窗口
@@ -115,6 +122,7 @@ typedef struct {
 	pthread_mutex_t send_lock; // 发送数据锁
 	char* sending_buf; // 发送数据缓存区
 	int sending_len; // 发送数据缓存长度
+	int have_send_len;	// 已发送数据长度
 
 	pthread_mutex_t recv_lock; // 接收数据锁
 	char* received_buf; // 接收数据缓存区
@@ -124,7 +132,9 @@ typedef struct {
 
 	window_t window; // 发送和接受窗口
 
-	char* packet_FIN;	// FIN或FIN_ACK包
+	bool is_retransing;		// 表明是否在重传
+
+	char* packet_FIN;	// FIN或FIN_ACK包（关闭连接超时重传用）
 
 } tju_tcp_t;
 

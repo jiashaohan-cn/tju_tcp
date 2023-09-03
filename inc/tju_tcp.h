@@ -51,9 +51,27 @@ int tju_recv (tju_tcp_t* sock, void *buffer, int len);
 */
 int tju_close (tju_tcp_t* sock);
 
+int tju_handle_packet(tju_tcp_t* sock, char* pkt);
+
+
+/*
+    ----------------------以下为自定义辅助函数声明-----------------------
+*/
+
 // 服务器用于关闭某个socket所用的线程
 void* tju_close_thread(void* arg);
 
-int tju_handle_packet(tju_tcp_t* sock, char* pkt);
+// 用于在发送缓冲区发送数据的线程
+void* sending_thread(void* arg);
+// 用于进行超时重传的线程
+void* retrans_thread(void* arg);
+
+// 计时器函数
+void startTimer(tju_tcp_t *sock);   // 开启计时器
+void stopTimer(void);               // 关闭计时器
+void timeout_handler(int signo);    // 超时处理函数
+
+void CalTimeout(tju_tcp_t *sock);   // 计算 SampleRTT 
+
 #endif
 
