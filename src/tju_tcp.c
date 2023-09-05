@@ -522,22 +522,6 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
                     // 重新开始计时
                     startTimer(sock);
                 }
-
-                // 清理发送缓冲区中已收到确认的数据
-                if (sock->sending_len&&(sock->window.wnd_send->ack_cnt==sock->sending_len || sock->window.wnd_send->ack_cnt>4 * MAX_SOCK_BUF_SIZE/5))
-                {
-                    printf("正在清理发送缓冲区:\n");
-                    pthread_mutex_lock(&sock->send_lock);   // 加锁
-                    char* new_sending_buf=(char *)malloc(MAX_SOCK_BUF_SIZE);
-                    memcpy(new_sending_buf,sock->sending_buf+sock->window.wnd_send->ack_cnt,sock->sending_len-sock->window.wnd_send->ack_cnt);
-                    free(sock->sending_buf);
-                    sock->sending_buf=new_sending_buf;
-                    sock->sending_len=sock->sending_len-sock->window.wnd_send->ack_cnt;
-                    sock->have_send_len=sock->have_send_len-sock->window.wnd_send->ack_cnt;
-                    sock->window.wnd_send->ack_cnt=0;
-                    pthread_mutex_unlock(&sock->send_lock);  // 解锁
-                    printf("清理完毕\n");
-                }
             }
         }
 
@@ -725,6 +709,22 @@ void* sending_thread(void* arg){
             sock->window.wnd_send->nextseq=wnd_nextseq;
 
             pthread_mutex_unlock(&sock->send_lock);  // 解锁
+        }
+        
+        // 清理发送缓冲区中已收到确认的数据
+        if (sock->sending_len&&(sock->window.wnd_send->ack_cnt==sock->sending_len || sock->window.wnd_send->ack_cnt>4 * MAX_SOCK_BUF_SIZE/5))
+        {
+            // printf("正在清理发送缓冲区:\n");
+            pthread_mutex_lock(&sock->send_lock);   // 加锁
+            char* new_sending_buf=(char *)malloc(MAX_SOCK_BUF_SIZE);
+            memcpy(new_sending_buf,sock->sending_buf+sock->window.wnd_send->ack_cnt,sock->sending_len-sock->window.wnd_send->ack_cnt);
+            free(sock->sending_buf);
+            sock->sending_buf=new_sending_buf;
+            sock->sending_len=sock->sending_len-sock->window.wnd_send->ack_cnt;
+            sock->have_send_len=sock->have_send_len-sock->window.wnd_send->ack_cnt;
+            sock->window.wnd_send->ack_cnt=0;
+            pthread_mutex_unlock(&sock->send_lock);  // 解锁
+            // printf("清理完毕\n");
         }
     }
 }
