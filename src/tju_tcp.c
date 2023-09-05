@@ -522,6 +522,22 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
                     // 重新开始计时
                     startTimer(sock);
                 }
+                
+                // 清理发送缓冲区中已收到确认的数据
+                if (sock->sending_len&&(sock->window.wnd_send->ack_cnt==sock->sending_len || 4*sock->window.wnd_send->ack_cnt>MAX_SOCK_BUF_SIZE/5))
+                {
+                    // printf("正在清理发送缓冲区:\n");
+                    pthread_mutex_lock(&sock->send_lock);   // 加锁
+                    char* new_sending_buf=(char *)malloc(MAX_SOCK_BUF_SIZE);
+                    memcpy(new_sending_buf,sock->sending_buf+sock->window.wnd_send->ack_cnt,sock->sending_len-sock->window.wnd_send->ack_cnt);
+                    free(sock->sending_buf);
+                    sock->sending_buf=new_sending_buf;
+                    sock->sending_len=sock->sending_len-sock->window.wnd_send->ack_cnt;
+                    sock->have_send_len=sock->have_send_len-sock->window.wnd_send->ack_cnt;
+                    sock->window.wnd_send->ack_cnt=0;
+                    pthread_mutex_unlock(&sock->send_lock);  // 解锁
+                    // printf("清理完毕\n");
+                }
             }
         }
 
@@ -710,22 +726,6 @@ void* sending_thread(void* arg){
 
             pthread_mutex_unlock(&sock->send_lock);  // 解锁
         }
-        
-        // 清理发送缓冲区中已收到确认的数据
-        if (sock->sending_len&&(sock->window.wnd_send->ack_cnt==sock->sending_len || sock->window.wnd_send->ack_cnt>4 * MAX_SOCK_BUF_SIZE/5))
-        {
-            // printf("正在清理发送缓冲区:\n");
-            pthread_mutex_lock(&sock->send_lock);   // 加锁
-            char* new_sending_buf=(char *)malloc(MAX_SOCK_BUF_SIZE);
-            memcpy(new_sending_buf,sock->sending_buf+sock->window.wnd_send->ack_cnt,sock->sending_len-sock->window.wnd_send->ack_cnt);
-            free(sock->sending_buf);
-            sock->sending_buf=new_sending_buf;
-            sock->sending_len=sock->sending_len-sock->window.wnd_send->ack_cnt;
-            sock->have_send_len=sock->have_send_len-sock->window.wnd_send->ack_cnt;
-            sock->window.wnd_send->ack_cnt=0;
-            pthread_mutex_unlock(&sock->send_lock);  // 解锁
-            // printf("清理完毕\n");
-        }
     }
 }
 void* retrans_thread(void* arg){    // 用于进行超时重传的线程
@@ -751,7 +751,6 @@ void* retrans_thread(void* arg){    // 用于进行超时重传的线程
             uint32_t have_sent=sock->have_send_len;
             uint32_t wnd_base=sock->window.wnd_send->base;
 
-            int times=0;    // 重传包的数量
             while (wnd_ack_cnt<have_sent){
                 char* data=sock->sending_buf+wnd_ack_cnt;
                 uint32_t dlen;
@@ -770,10 +769,6 @@ void* retrans_thread(void* arg){    // 用于进行超时重传的线程
                     free(packet2);
                 }
                 printf("重新发送 %d 字节大小的报文 seq = %d\n", dlen, wnd_base);
-
-                // 重传3个包即结束重传
-                times++;
-                if (times==3) break;
 
 // event 日志
 // fprintf(getEventlog(),"[SEND] [%ld] [seq:%d ack:%d flag:%s]\n",getCurrentTime(),wnd_base,0,getFlagstr(NO_FLAG));
