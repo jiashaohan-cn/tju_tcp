@@ -73,5 +73,22 @@ void timeout_handler(int signo);    // 超时处理函数
 
 void CalTimeout(tju_tcp_t *sock);   // 计算 SampleRTT 
 
+#define min(x,y) ((x<y)?(x):(y))    // 宏定义 min() 函数
+
+uint16_t get_wnd_free_len(uint8_t* mark);   // 获取窗口前移长度
+
+/*
+	-------以下为event日志记录相关内容
+*/
+long getCurrentTime();      // 返回调用时间
+char* getFlagstr(uint8_t n);    // 返回数据报的标志位字符串
+FILE* getEventlog();        // 返回将要写入的日志文件
+
+FILE *server_event_log;     // 服务端
+FILE *client_event_log;     // 客户端
+
+void init_log();        // 初始化
+void close_log();       // 关闭
+
 #endif
 
