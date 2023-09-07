@@ -18,8 +18,8 @@
 #include <arpa/inet.h>
 #include <signal.h>		// 使用 signal 函数
 
-#define SERVER_IP "172.17.0.6"
-#define CLIENT_IP "172.17.0.5"
+#define SERVER_IP "172.17.0.3"
+#define CLIENT_IP "172.17.0.2"
 
 // 初始化序列号(随机)----三次挥手建立连接使用
 #define SERVER_ISN 0
@@ -51,7 +51,7 @@ bool TIMEOUT_FLAG;
 // 最大窗口大小
 #define MAX_WINDOW_SIZE 32*MAX_DLEN // 比如最多放32个满载数据包
 // 最大发送和接收缓冲区大小
-#define MAX_SOCK_BUF_SIZE 100000*MAX_LEN	// 发送缓冲区和接收缓冲区的大小至少为 5000 个 MSS
+#define MAX_SOCK_BUF_SIZE 50000*MAX_LEN	// 发送缓冲区和接收缓冲区的大小至少为 5000 个 MSS
 
 // TCP socket 状态定义
 #define CLOSED 0
@@ -71,30 +71,32 @@ bool TIMEOUT_FLAG;
 #define CONGESTION_AVOIDANCE 1
 #define FAST_RECOVERY 2
 
+// 最短超时重传间隔 (200毫秒)
+#define TCP_RTO_MIN 200000
+
 // TCP 发送窗口
 // 注释的内容如果想用就可以用 不想用就删掉 仅仅提供思路和灵感
 typedef struct {
-	uint32_t window_size;	// 当前发送窗口大小
-	// pthread_mutex_t ack_cnt_lock;	// ack_cnt锁
-	uint32_t ack_cnt;		// 缓冲区中已确认的字节数
-  	uint32_t base;		// 发送窗口起始位置序号
-    uint32_t nextseq;   // 下一个待发送序号
-	uint32_t same_ack_cnt;	// 连续重复ack数量
-	uint64_t estmated_rtt;	// 期望 RTT
-	uint64_t dev_rtt;		// 方差 RTT
-	bool is_estimating_rtt;	// 是否在测量 SampleRTT
-	uint32_t rtt_expect_ack;	// 用来测量RTT的报文期待的ACK号
-  	struct timeval send_time;	// 记录发送时间
-  	struct itimerval timeout;		// 记录超时重传间隔
-  	uint32_t rwnd; 		// 发送端接收窗口大小----拥塞窗口
-  	int window_status;	// 该窗口拥塞控制状态
-  	uint32_t ssthresh; 	// 拥塞阈值
+	uint32_t window_size;	// 当前发送窗口大小-----------------------------------滑动窗口
+	uint32_t ack_cnt;		// 缓冲区中已确认的字节数------------------------------滑动窗口
+  	uint32_t base;		// 发送窗口起始位置序号------------------------------------滑动窗口
+    uint32_t nextseq;   // 下一个待发送序号----------------------------------------滑动窗口
+	uint32_t same_ack_cnt;	// 连续重复ack数量------------------------------------快速重传
+	uint64_t estmated_rtt;	// 期望 RTT-------------------------------------------计算RTO
+	uint64_t dev_rtt;		// 方差 RTT-------------------------------------------计算RTO
+	bool is_estimating_rtt;	// 是否在测量 SampleRTT-------------------------------计算RTO
+	uint32_t rtt_expect_ack;	// 用来测量RTT的报文期待的ACK号--------------------计算RTO
+  	struct timeval send_time;	// 记录发送时间-----------------------------------计算RTO
+  	struct itimerval timeout;		// 记录超时重传间隔---------------------------记录RTO
+  	uint32_t rwnd; 		// 发送端接收窗口大小----拥塞窗口--------------------------流量控制
+  	int window_status;	// 该窗口拥塞控制状态-------------------------------------拥塞控制
+  	uint32_t ssthresh; 	// 拥塞阈值-----------------------------------------------拥塞控制
 } sender_window_t;
 
 // TCP 接受窗口
 // 注释的内容如果想用就可以用 不想用就删掉 仅仅提供思路和灵感
 typedef struct {
-	uint32_t window_size;	// 当前窗口大小
+	uint32_t remain_size;	// 接收窗口剩余空间大小
 	char* recv_buf;			// 接收窗口缓冲区
 //   received_packet_t* head;
 //   char buf[TCP_RECVWN_SIZE];
