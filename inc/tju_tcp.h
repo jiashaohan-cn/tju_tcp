@@ -90,5 +90,52 @@ FILE *client_event_log;     // 客户端
 void init_log();        // 初始化
 void close_log();       // 关闭
 
+// 宏定义函数-----EVENT事件 - 打印日志
+#define _SEND_LOG_(pkt) \
+{\
+    fprintf(getEventlog(),"[%ld] [SEND] [seq:%d ack:%d flag:%s]\n",\
+    getCurrentTime(),get_seq(pkt),get_ack(pkt),getFlagstr(NO_FLAG));\
+}
+
+#define _RECV_LOG_(pkt) \
+{\
+    fprintf(getEventlog(),"[%ld] [RECV] [seq:%d ack:%d flag:%s]\n",\
+    getCurrentTime(),get_seq(pkt),get_ack(pkt),getFlagstr(get_flags(pkt)));\
+}
+
+#define _CWND_LOG_(sock) \
+{\
+    fprintf(getEventlog(),"[%ld] [CWND] [type:%d size:%d]\n",\
+    getCurrentTime(),sock->window.wnd_send->window_status,sock->window.wnd_send->rwnd/MAX_DLEN);\
+}
+
+#define _RWND_LOG_(sock) \
+{\
+    fprintf(getEventlog(),"[%ld] [RWND] [size:%d]\n",\
+    getCurrentTime(),MAX_SOCK_BUF_SIZE-sock->received_len/MAX_DLEN);\
+}
+
+#define _SWND_LOG_(sock) \
+{\
+    fprintf(getEventlog(),"[%ld] [SWND] [size:%d]\n",\
+    getCurrentTime(),sock->window.wnd_send->window_size/MAX_DLEN);\
+}
+
+#define _RTTS_LOG_(sock,sampleRTT) \
+{\
+    float sample=sampleRTT*0.001;\
+    float estimated=sock->window.wnd_send->estmated_rtt*0.001;\
+    float deviation=sock->window.wnd_send->dev_rtt*0.001;\
+    float timeoutinterval=sock->window.wnd_send->timeout.it_value.tv_usec*0.001;\
+    fprintf(getEventlog(),"[%ld] [RTTS] [SampleRTT:%f EstimatedRTT:%f DeviationRTT:%f TimeoutInterval:%f]\n",\
+    getCurrentTime(),sample,estimated,deviation,timeoutinterval);\
+}
+
+#define _DELV_LOG_(seq,len) \
+{\
+    fprintf(getEventlog(),"[%ld] [DELV] [seq:%d size:%d]\n",\
+    getCurrentTime(),seq,len);\
+}
+
 #endif
 

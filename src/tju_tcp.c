@@ -8,7 +8,7 @@
 tju_tcp_t* tju_socket(){
 
     // 初始化event log
-    // init_log();
+    init_log();
 
     tju_tcp_t* sock = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
     sock->state = CLOSED;
@@ -168,6 +168,7 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     char* packet_SYN=create_packet_buf(local_addr.port,target_addr.port,seq,0,\
             DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,SYN_FLAG_MASK,1,0,NULL,0);
     sendToLayer3(packet_SYN,DEFAULT_HEADER_LEN);
+    _SEND_LOG_(packet_SYN);
     time_point=clock();  // 开始计时
     sock->state=SYN_SENT;
     printf("客户端发送SYN---第一次握手\n");
@@ -180,6 +181,7 @@ int tju_connect(tju_tcp_t* sock, tju_sock_addr target_addr){
     while (sock->state!=ESTABLISHED){
         if ((clock()-time_point)>=6000000){    //触发计时器--超时重传   (CLOCK_PER_SEC)
             sendToLayer3(packet_SYN,DEFAULT_HEADER_LEN);
+            _SEND_LOG_(packet_SYN);
             printf("客户端重新发送SYN请求----第一次握手\n");
             time_point=clock(); //重新开始计时
         }
@@ -263,19 +265,21 @@ int tju_recv(tju_tcp_t* sock, void *buffer, int len){
     }else{
         sock->received_len = 0;
     }
+    _RWND_LOG_(sock);
     pthread_mutex_unlock(&(sock->recv_lock)); // 解锁
 
     return read_len;
 }
 
 int tju_handle_packet(tju_tcp_t* sock, char* pkt){
-
+    _RECV_LOG_(pkt);
     // 判断收到报文的 socket 的状态是否为 SYN_SENT
     if (sock->state==SYN_SENT){
         if (get_ack(pkt)==CLIENT_ISN+1){
             char* packet_SYN_ACK2=create_packet_buf(get_dst(pkt),get_src(pkt),get_ack(pkt),get_seq(pkt)+1,\
                         DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
             sendToLayer3(packet_SYN_ACK2,DEFAULT_HEADER_LEN);
+            _SEND_LOG_(packet_SYN_ACK2);
             free(packet_SYN_ACK2);
             sock->state=ESTABLISHED;
             printf("客户端发送SYN_ACK----第三次握手\n");
@@ -287,6 +291,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             char* packet_SYN_ACK1=create_packet_buf(get_dst(pkt),get_src(pkt),SERVER_ISN,get_seq(pkt)+1,\
                         DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,(SYN_FLAG_MASK|ACK_FLAG_MASK),1,0,NULL,0);
             sendToLayer3(packet_SYN_ACK1,DEFAULT_HEADER_LEN);
+            _SEND_LOG_(packet_SYN_ACK1);
             printf("服务器发送SYN_ACK----第二次握手\n");
 
             // 将 socket 存入半连接队列中
@@ -319,10 +324,6 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         }
     }
     else if (sock->state==ESTABLISHED){
-
-// event 日志
-// fprintf(getEventlog(),"[RECV] [%ld] [seq:%d ack:%d flag:%s]\n",getCurrentTime(),get_seq(pkt),get_ack(pkt),getFlagstr(get_flags(pkt)));
-
         // 服务器收到FIN报文
         if (get_flags(pkt)==(FIN_FLAG_MASK)){     
             // 发送FIN_ACK报文
@@ -330,6 +331,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             char* packet_FIN_ACK=create_packet_buf(get_dst(pkt),get_src(pkt),get_ack(pkt),ack,\
                     DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
             sendToLayer3(packet_FIN_ACK,DEFAULT_HEADER_LEN);
+            _SEND_LOG_(packet_FIN_ACK);
             free(packet_FIN_ACK);
             printf("服务器发送ACK报文并进入CLOSE_WAIT\n");
 
@@ -341,6 +343,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             char* packet_FIN=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,FIN_SEQ,\
                             ack,DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,FIN_FLAG_MASK|ACK_FLAG_MASK,1,0,NULL,0);
             sendToLayer3(packet_FIN,DEFAULT_HEADER_LEN);
+            _SEND_LOG_(packet_FIN);
             sock->packet_FIN=packet_FIN;
             sock->state=LAST_ACK;
             printf("服务器完成第三次挥手，进入LAST_ACK\n");
@@ -384,6 +387,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
                     pthread_mutex_lock(&(sock->recv_lock));     // 加锁
                     memcpy(sock->received_buf+sock->received_len,recv_buf,free_len);
                     sock->received_len+=free_len;
+                    _RWND_LOG_(sock);
                     pthread_mutex_unlock(&(sock->recv_lock)); // 解锁
 
                     // 更新接收窗口
@@ -394,18 +398,20 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
                     memset(sock->window.wnd_recv->mark,0,MAX_WINDOW_SIZE);
                     memcpy(sock->window.wnd_recv->mark,mark+free_len,MAX_WINDOW_SIZE-free_len);
                     free(mark);
-                    expt_seq+=free_len;
                     sock->window.wnd_recv->expect_seq+=free_len;
+
+                    _DELV_LOG_(expt_seq,free_len);
                 }
 
                 // 发送ACK报文
                 uint32_t seq=sock->window.wnd_send->nextseq;
-                uint32_t ack = expt_seq;
+                uint32_t ack = sock->window.wnd_recv->expect_seq;
                 uint16_t adv_window = sock->window.wnd_recv->remain_size;
 
                 char* tmp_packet_ACK1=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,seq,ack,\
                         DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,adv_window,0,NULL,0);
                 sendToLayer3(tmp_packet_ACK1,DEFAULT_HEADER_LEN);
+                _SEND_LOG_(tmp_packet_ACK1);
                 free(tmp_packet_ACK1);
             }
             else{   // 收到的序列号不是所期望的
@@ -417,6 +423,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
                 char* tmp_packet_ACK2=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,seq,ack,\
                         DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,adv_window,0,NULL,0);
                 sendToLayer3(tmp_packet_ACK2,DEFAULT_HEADER_LEN);
+                _SEND_LOG_(tmp_packet_ACK2);
                 free(tmp_packet_ACK2);
             }
         }
@@ -426,6 +433,9 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             // 更新流量控制窗口
             sock->window.wnd_send->rwnd=get_advertised_window(pkt);
             sock->window.wnd_send->window_size=sock->window.wnd_send->rwnd;
+            _CWND_LOG_(sock);
+            _SWND_LOG_(sock);
+            // CWNDLOG
             if (sock->window.wnd_send->window_size==0){
                 printf("开启0窗口定时器\n");
                 startTimer(sock);
@@ -455,11 +465,6 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
 //                 // 快速恢复
 //                 else if (sock->window.wnd_send->window_status==FAST_RECOVERY){
 //                     sock->window.wnd_send->window_size+=MAX_DLEN;
-
-// // event 日志
-// fprintf(getEventlog(),"[RWND] [%ld] [size:%d]\n",getCurrentTime(),1);
-// fprintf(getEventlog(),"[SWND] [%ld] [size:%d]\n",getCurrentTime(),sock->window.wnd_send->window_size);
-
 //                 }
 
                 // 判断是否进入快速恢复状态
@@ -474,11 +479,6 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
 //                     // 开启快速重传
 //                     sock->is_retransing = true;
 //                     RETRANS=TRUE;
-
-// // event 日志
-// fprintf(getEventlog(),"[RWND] [%ld] [size:%d]\n",getCurrentTime(),1);
-// fprintf(getEventlog(),"[SWND] [%ld] [size:%d]\n",getCurrentTime(),sock->window.wnd_send->window_size);
-
 //                 }
             }
             // 收到可用于更新的ACK
@@ -506,17 +506,13 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
                 //     sock->window.wnd_send->window_status=CONGESTION_AVOIDANCE;
                 // }
 
-// // event 日志
-// fprintf(getEventlog(),"[RWND] [%ld] [size:%d]\n",getCurrentTime(),1);
-// fprintf(getEventlog(),"[SWND] [%ld] [size:%d]\n",getCurrentTime(),sock->window.wnd_send->window_size);
-
                 // 开始计算 SampleRTT
-                // if (sock->window.wnd_send->is_estimating_rtt==TRUE){
-                //     if (sock->window.wnd_send->rtt_expect_ack<=get_ack(pkt)){
-                //         CalTimeout(sock);
-                //     }
-                //     sock->window.wnd_send->is_estimating_rtt=FALSE;
-                // }
+                if (sock->window.wnd_send->is_estimating_rtt==TRUE){
+                    if (sock->window.wnd_send->rtt_expect_ack<=get_ack(pkt)){
+                        CalTimeout(sock);
+                    }
+                    sock->window.wnd_send->is_estimating_rtt=FALSE;
+                }
 
                 // 窗口滑动
                 sock->window.wnd_send->ack_cnt+=get_ack(pkt)-sock->window.wnd_send->base;
@@ -573,6 +569,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             char* packet_FIN_ACK3=create_packet_buf(get_dst(pkt),get_src(pkt),FIN_SEQ+1,get_seq(pkt)+1,\
                     DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
             sendToLayer3(packet_FIN_ACK3,DEFAULT_HEADER_LEN);
+            _SEND_LOG_(packet_FIN_ACK3);
             free(packet_FIN_ACK3);
             // 状态更新
             sock->state=CLOSING;
@@ -585,6 +582,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
             char* packet_FIN_ACK2=create_packet_buf(get_dst(pkt),get_src(pkt),get_ack(pkt),get_seq(pkt)+1,\
                     DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,ACK_FLAG_MASK,1,0,NULL,0);
             sendToLayer3(packet_FIN_ACK2,DEFAULT_HEADER_LEN);
+            _SEND_LOG_(packet_FIN_ACK2);
             free(packet_FIN_ACK2);
 
             // 更新socket状态并等待2MSL
@@ -620,6 +618,7 @@ int tju_close (tju_tcp_t* sock){
                         0,DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,FIN_FLAG_MASK,1,0,NULL,0);
         // 发送
         sendToLayer3(packet_FIN,DEFAULT_HEADER_LEN);
+        _SEND_LOG_(packet_FIN);
         sock->packet_FIN=packet_FIN;
         time_point=clock();     // 开始计时
         // 状态更新
@@ -639,6 +638,7 @@ int tju_close (tju_tcp_t* sock){
     while (sock->state!=CLOSED){
         if ((clock()-time_point)>=8000000){
             sendToLayer3(sock->packet_FIN,DEFAULT_HEADER_LEN);
+            _SEND_LOG_(sock->packet_FIN);
             printf("超时重传FIN\n");
             time_point=clock();
         }
@@ -653,7 +653,7 @@ int tju_close (tju_tcp_t* sock){
     free(sock);
 
     // 关闭event log
-    // close_log();
+    close_log();
 
     return 0;
 }
@@ -670,10 +670,6 @@ void* tju_close_thread(void* arg){
 // 用于在发送缓冲区发送数据的线程（connect和accept函数中）
 void* sending_thread(void* arg){
     tju_tcp_t* sock=(tju_tcp_t *)arg;
-
-// event 日志
-// fprintf(getEventlog(),"[RWND] [%ld] [size:%d]\n",getCurrentTime(),1);
-// fprintf(getEventlog(),"[SWND] [%ld] [size:%d]\n",getCurrentTime(),sock->window.wnd_send->window_size);
 
     while (1){
         // 发送窗口中有未发送的数据 & 首次发送（非重传）
@@ -700,6 +696,7 @@ void* sending_thread(void* arg){
                     char *packet1=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,wnd_nextseq,0,\
                             DEFAULT_HEADER_LEN,plen,NO_FLAG,1,0,data,dlen);
                     sendToLayer3(packet1,plen);
+                    _SEND_LOG_(packet1);
                     free(packet1);
                 }
                 else{
@@ -708,19 +705,17 @@ void* sending_thread(void* arg){
                     char *packet2=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,wnd_nextseq,0,\
                             DEFAULT_HEADER_LEN,plen,NO_FLAG,1,0,data,dlen);
                     sendToLayer3(packet2,plen);
+                    _SEND_LOG_(packet2);
                     free(packet2);
                 }
                 printf("首次发送 %d 字节大小的报文 seq = %d\n", dlen, wnd_nextseq);
 
-// event 日志
-// fprintf(getEventlog(),"[SEND] [%ld] [seq:%d ack:%d flag:%s]\n",getCurrentTime(),wnd_nextseq,0,getFlagstr(NO_FLAG));
-
                 // 开始计算 SampleRTT
-                // if (sock->window.wnd_send->is_estimating_rtt == false){
-                //     sock->window.wnd_send->is_estimating_rtt = TRUE;
-                //     gettimeofday(&sock->window.wnd_send->send_time, NULL);
-                //     sock->window.wnd_send->rtt_expect_ack=wnd_nextseq+dlen;
-                // }
+                if (sock->window.wnd_send->is_estimating_rtt == false){
+                    sock->window.wnd_send->is_estimating_rtt = TRUE;
+                    gettimeofday(&sock->window.wnd_send->send_time, NULL);
+                    sock->window.wnd_send->rtt_expect_ack=wnd_nextseq+dlen;
+                }
 
                 // 如果发送窗口的base和nextseq一样 说明是窗口的第一个 为其启动计时器
                 if (wnd_base == wnd_nextseq)
@@ -751,6 +746,7 @@ void* retrans_thread(void* arg){    // 用于进行超时重传的线程
                 char* get_swnd_packet=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,sock->window.wnd_send->base-1,0,\
                         DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN,NO_FLAG,1,0,NULL,0);
                 sendToLayer3(get_swnd_packet,DEFAULT_HEADER_LEN);
+                _SEND_LOG_(get_swnd_packet);
                 free(get_swnd_packet);
                 startTimer(sock);
                 continue;
@@ -793,6 +789,7 @@ void* retrans_thread(void* arg){    // 用于进行超时重传的线程
                     char* packet1=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,wnd_base,0,\
                             DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN+dlen,NO_FLAG,1,0,data,dlen);
                     sendToLayer3(packet1,DEFAULT_HEADER_LEN+dlen);
+                    _SEND_LOG_(packet1);
                     free(packet1);
                 }
                 else{
@@ -800,12 +797,10 @@ void* retrans_thread(void* arg){    // 用于进行超时重传的线程
                     char* packet2=create_packet_buf(sock->established_local_addr.port,sock->established_remote_addr.port,wnd_base,0,\
                             DEFAULT_HEADER_LEN,DEFAULT_HEADER_LEN+dlen,NO_FLAG,1,0,data,dlen);
                     sendToLayer3(packet2,DEFAULT_HEADER_LEN+dlen);
+                    _SEND_LOG_(packet2);
                     free(packet2);
                 }
                 printf("重新发送 %d 字节大小的报文 seq = %d\n", dlen, wnd_base);
-
-// event 日志
-// fprintf(getEventlog(),"[SEND] [%ld] [seq:%d ack:%d flag:%s]\n",getCurrentTime(),wnd_base,0,getFlagstr(NO_FLAG));
 
                 // 启动计时器
                 if (wnd_ack_cnt==sock->window.wnd_send->ack_cnt){
@@ -878,6 +873,8 @@ void CalTimeout(tju_tcp_t *sock){   // 计算 SampleRTT
 
     // 计算超时重传间隔 RTO
     sock->window.wnd_send->timeout.it_value.tv_usec = sock->window.wnd_send->estmated_rtt + 4 * sock->window.wnd_send->dev_rtt;
+
+    _RTTS_LOG_(sock,sampleRTT);
 }
 uint16_t get_wnd_free_len(uint8_t* mark){   // 获取窗口前移长度
     uint16_t ans=0;
@@ -886,6 +883,7 @@ uint16_t get_wnd_free_len(uint8_t* mark){   // 获取窗口前移长度
     }
     return ans;
 }
+
 
 /*
         event日志记录函数
@@ -918,8 +916,8 @@ FILE* getEventlog(){    // 返回将要写入的日志文件
     }
 }
 void init_log(){
-    server_event_log=fopen("./server.event.log","w");
-    client_event_log=fopen("./client.event.log","w");
+    server_event_log=fopen("./server.event.trace","w");
+    client_event_log=fopen("./client.event.trace","w");
 }
 void close_log(){
     fclose(server_event_log);
