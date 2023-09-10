@@ -4,7 +4,9 @@ test/
 .vscode/
 
 # 两个event日志
-client.event.log
-server.event.log
-
+client.event.trace
+server.event.trace
+client
+server
 handin.zip
+

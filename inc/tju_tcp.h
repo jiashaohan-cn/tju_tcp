@@ -81,7 +81,7 @@ uint16_t get_wnd_free_len(uint8_t* mark);   // 获取窗口前移长度
 	-------以下为event日志记录相关内容
 */
 long getCurrentTime();      // 返回调用时间
-char* getFlagstr(uint8_t n);    // 返回数据报的标志位字符串
+// char* getFlagstr(uint8_t n);    // 返回数据报的标志位字符串-------(不再使用)
 FILE* getEventlog();        // 返回将要写入的日志文件
 
 FILE *server_event_log;     // 服务端
@@ -93,32 +93,32 @@ void close_log();       // 关闭
 // 宏定义函数-----EVENT事件 - 打印日志
 #define _SEND_LOG_(pkt) \
 {\
-    fprintf(getEventlog(),"[%ld] [SEND] [seq:%d ack:%d flag:%s]\n",\
-    getCurrentTime(),get_seq(pkt),get_ack(pkt),getFlagstr(NO_FLAG));\
+    fprintf(getEventlog(),"[%ld] [SEND] [seq:%d ack:%d flag:%d length:%d]\n",\
+    getCurrentTime(),get_seq(pkt),get_ack(pkt),get_flags(pkt),get_plen(pkt)-get_hlen(pkt));\
 }
 
 #define _RECV_LOG_(pkt) \
 {\
-    fprintf(getEventlog(),"[%ld] [RECV] [seq:%d ack:%d flag:%s]\n",\
-    getCurrentTime(),get_seq(pkt),get_ack(pkt),getFlagstr(get_flags(pkt)));\
+    fprintf(getEventlog(),"[%ld] [RECV] [seq:%d ack:%d flag:%d length:%d]\n",\
+    getCurrentTime(),get_seq(pkt),get_ack(pkt),get_flags(pkt),get_plen(pkt)-get_hlen(pkt));\
 }
 
 #define _CWND_LOG_(sock) \
 {\
     fprintf(getEventlog(),"[%ld] [CWND] [type:%d size:%d]\n",\
-    getCurrentTime(),sock->window.wnd_send->window_status,sock->window.wnd_send->rwnd/MAX_DLEN);\
+    getCurrentTime(),sock->window.wnd_send->window_status,sock->window.wnd_send->rwnd);\
 }
 
 #define _RWND_LOG_(sock) \
 {\
     fprintf(getEventlog(),"[%ld] [RWND] [size:%d]\n",\
-    getCurrentTime(),MAX_SOCK_BUF_SIZE-sock->received_len/MAX_DLEN);\
+    getCurrentTime(),MAX_SOCK_BUF_SIZE-sock->received_len);\
 }
 
 #define _SWND_LOG_(sock) \
 {\
     fprintf(getEventlog(),"[%ld] [SWND] [size:%d]\n",\
-    getCurrentTime(),sock->window.wnd_send->window_size/MAX_DLEN);\
+    getCurrentTime(),sock->window.wnd_send->window_size);\
 }
 
 #define _RTTS_LOG_(sock,sampleRTT) \

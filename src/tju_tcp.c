@@ -10,6 +10,9 @@ tju_tcp_t* tju_socket(){
     // 初始化event log
     init_log();
 
+    // 确定超时处理函数
+    signal(SIGALRM, timeout_handler);
+
     tju_tcp_t* sock = (tju_tcp_t*)malloc(sizeof(tju_tcp_t));
     sock->state = CLOSED;
     
@@ -30,7 +33,7 @@ tju_tcp_t* tju_socket(){
 
     // 初始化发送窗口
     sock->window.wnd_send = (sender_window_t*)malloc(sizeof(sender_window_t));
-    sock->window.wnd_send->window_size=MAX_WINDOW_SIZE;
+    sock->window.wnd_send->window_size=MAX_SWINDOW_SIZE;
     sock->window.wnd_send->ack_cnt=0;
     sock->window.wnd_send->base=1;
     sock->window.wnd_send->nextseq=1;
@@ -41,19 +44,19 @@ tju_tcp_t* tju_socket(){
     sock->window.wnd_send->rtt_expect_ack=0;  // (sending_thread线程中更新)
     // sock->window.wnd_send->send_time
     sock->window.wnd_send->timeout.it_value.tv_sec = 0;
-    sock->window.wnd_send->timeout.it_value.tv_usec = TCP_RTO_MIN;
+    sock->window.wnd_send->timeout.it_value.tv_usec = 500000;
     sock->window.wnd_send->timeout.it_interval.tv_sec = 0;
     sock->window.wnd_send->timeout.it_interval.tv_usec = 0;
-    sock->window.wnd_send->rwnd=MAX_WINDOW_SIZE;
+    sock->window.wnd_send->rwnd=MAX_RWINDOW_SIZE;
     sock->window.wnd_send->window_status=SLOW_START;
-    sock->window.wnd_send->ssthresh=MAX_WINDOW_SIZE>>1;
+    sock->window.wnd_send->ssthresh=MAX_SWINDOW_SIZE>>1;
 
     // 初始化接收窗口
     sock->window.wnd_recv = (receiver_window_t *)malloc(sizeof(receiver_window_t));
-    sock->window.wnd_recv->remain_size=MAX_WINDOW_SIZE;
-    sock->window.wnd_recv->recv_buf=(char *)malloc(MAX_WINDOW_SIZE);
-    sock->window.wnd_recv->mark=(uint8_t *)malloc(MAX_WINDOW_SIZE);
-    memset(sock->window.wnd_recv->mark,0,MAX_WINDOW_SIZE);
+    sock->window.wnd_recv->remain_size=MAX_RWINDOW_SIZE;
+    sock->window.wnd_recv->recv_buf=(char *)malloc(MAX_RWINDOW_SIZE);
+    sock->window.wnd_recv->mark=(uint8_t *)malloc(MAX_RWINDOW_SIZE);
+    memset(sock->window.wnd_recv->mark,0,MAX_RWINDOW_SIZE);
     sock->window.wnd_recv->expect_seq=1;
 
     sock->is_retransing=FALSE;
@@ -268,6 +271,8 @@ int tju_recv(tju_tcp_t* sock, void *buffer, int len){
     _RWND_LOG_(sock);
     pthread_mutex_unlock(&(sock->recv_lock)); // 解锁
 
+    // for (int i=0;i<100000;i++) ; // 降速用
+
     return read_len;
 }
 
@@ -367,7 +372,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
                 uint32_t expt_seq=sock->window.wnd_recv->expect_seq;
                 char* recv_buf=sock->window.wnd_recv->recv_buf;
                 uint8_t* mark=sock->window.wnd_recv->mark;
-                if (get_seq(pkt)+dlen<expt_seq+MAX_WINDOW_SIZE){
+                if (get_seq(pkt)+dlen<expt_seq+MAX_RWINDOW_SIZE){
                     // 接收窗口可以放下
                     memcpy(recv_buf+get_seq(pkt)-expt_seq,pkt+get_hlen(pkt),dlen);
                     memset(mark+get_seq(pkt)-expt_seq,1,dlen);
@@ -379,28 +384,30 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
                     if (MAX_SOCK_BUF_SIZE-sock->received_len<free_len){
                         // printf("接收缓冲区装不下，丢弃该报文\n");
                         // 更新接收窗口剩余大小
-                        sock->window.wnd_recv->remain_size=MAX_WINDOW_SIZE-free_len;
-                        return 0;
+                        sock->window.wnd_recv->remain_size=MAX_RWINDOW_SIZE-free_len;
                     }
-                    sock->window.wnd_recv->remain_size=MAX_WINDOW_SIZE;
-                    // 缓冲区能够装下该数据报
-                    pthread_mutex_lock(&(sock->recv_lock));     // 加锁
-                    memcpy(sock->received_buf+sock->received_len,recv_buf,free_len);
-                    sock->received_len+=free_len;
-                    _RWND_LOG_(sock);
-                    pthread_mutex_unlock(&(sock->recv_lock)); // 解锁
+                    else{
+                        sock->window.wnd_recv->remain_size=MAX_RWINDOW_SIZE;
+                        // 缓冲区能够装下该数据报
+                        pthread_mutex_lock(&(sock->recv_lock));     // 加锁
+                        memcpy(sock->received_buf+sock->received_len,recv_buf,free_len);
+                        sock->received_len+=free_len;
+                        _RWND_LOG_(sock);
+                        pthread_mutex_unlock(&(sock->recv_lock)); // 解锁
 
-                    // 更新接收窗口
-                    sock->window.wnd_recv->recv_buf=(char *)malloc(MAX_WINDOW_SIZE);
-                    memcpy(sock->window.wnd_recv->recv_buf,recv_buf+free_len,MAX_WINDOW_SIZE-free_len);
-                    free(recv_buf);
-                    sock->window.wnd_recv->mark=(uint8_t *)malloc(MAX_WINDOW_SIZE);
-                    memset(sock->window.wnd_recv->mark,0,MAX_WINDOW_SIZE);
-                    memcpy(sock->window.wnd_recv->mark,mark+free_len,MAX_WINDOW_SIZE-free_len);
-                    free(mark);
-                    sock->window.wnd_recv->expect_seq+=free_len;
+                        // 更新接收窗口
+                        sock->window.wnd_recv->recv_buf=(char *)malloc(MAX_RWINDOW_SIZE);
+                        memcpy(sock->window.wnd_recv->recv_buf,recv_buf+free_len,MAX_RWINDOW_SIZE-free_len);
+                        free(recv_buf);
+                        sock->window.wnd_recv->mark=(uint8_t *)malloc(MAX_RWINDOW_SIZE);
+                        memset(sock->window.wnd_recv->mark,0,MAX_RWINDOW_SIZE);
+                        memcpy(sock->window.wnd_recv->mark,mark+free_len,MAX_RWINDOW_SIZE-free_len);
+                        free(mark);
+                        sock->window.wnd_recv->expect_seq+=free_len;
 
-                    _DELV_LOG_(expt_seq,free_len);
+                        _DELV_LOG_(expt_seq,free_len);
+                    }
+
                 }
 
                 // 发送ACK报文
@@ -432,7 +439,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
         else if (get_flags(pkt)==ACK_FLAG_MASK){
             // 更新流量控制窗口
             sock->window.wnd_send->rwnd=get_advertised_window(pkt);
-            sock->window.wnd_send->window_size=sock->window.wnd_send->rwnd;
+            sock->window.wnd_send->window_size=min(MAX_SWINDOW_SIZE,sock->window.wnd_send->rwnd);
             _CWND_LOG_(sock);
             _SWND_LOG_(sock);
             // CWNDLOG
@@ -454,6 +461,7 @@ int tju_handle_packet(tju_tcp_t* sock, char* pkt){
                 // 快速重传
                 sock->window.wnd_send->same_ack_cnt++;
                 if (sock->window.wnd_send->same_ack_cnt==3){
+                    printf("触发快速重传\n");
                     RETRANS=TRUE;
                     sock->window.wnd_send->same_ack_cnt=0;
                 }
@@ -754,11 +762,11 @@ void* retrans_thread(void* arg){    // 用于进行超时重传的线程
 
             // 没有触发超时重传
             if (sock->is_retransing == FALSE){
-                RETEANS=FALSE;
+                RETRANS=FALSE;
                 if (sock->window.wnd_send->ack_cnt<sock->have_send_len){
                     printf("发送窗口还有未收到确认的数据\n");
                     sock->is_retransing = TRUE;
-                    RETEANS=TRUE;
+                    RETRANS=TRUE;
                 }
                 continue;
             }
@@ -824,8 +832,6 @@ void startTimer(tju_tcp_t *sock){   // 开启计时器
     struct itimerval tick;
     RETRANS = FALSE;
     TIMEOUT_FLAG = FALSE;
-    // 确定超时处理函数
-    signal(SIGALRM, timeout_handler);
 
     // 确定超时重传间隔
     memset(&tick, 0, sizeof(tick));
@@ -891,20 +897,23 @@ uint16_t get_wnd_free_len(uint8_t* mark){   // 获取窗口前移长度
 long getCurrentTime(){      // 返回调用时间
     struct timeval tv;
     gettimeofday(&tv,NULL);
-    return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    return tv.tv_sec * 1000000 + tv.tv_usec;
 }
-char* getFlagstr(uint8_t n){    // 返回数据报的标志位字符串
-    if (n==NO_FLAG) return "NO_FLAG";
-    else if (n==SYN_FLAG_MASK) return "SYN";
-    else if (n==FIN_FLAG_MASK) return "FIN";
-    else if (n==ACK_FLAG_MASK) return "ACK";
-    else if (n==(FIN_FLAG_MASK|ACK_FLAG_MASK)) return "FIN|ACK";
-    else if (n==(SYN_FLAG_MASK|ACK_FLAG_MASK)) return "SYN|ACK";
-    else{
-        printf("event日志: getFlagstr标志位获取错误\n");
-        exit(-1);
-    }
-}
+
+/*------------不再使用-------------*/
+// char* getFlagstr(uint8_t n){    // 返回数据报的标志位字符串
+//     if (n==NO_FLAG) return "NO_FLAG";
+//     else if (n==SYN_FLAG_MASK) return "SYN";
+//     else if (n==FIN_FLAG_MASK) return "FIN";
+//     else if (n==ACK_FLAG_MASK) return "ACK";
+//     else if (n==(FIN_FLAG_MASK|ACK_FLAG_MASK)) return "FIN|ACK";
+//     else if (n==(SYN_FLAG_MASK|ACK_FLAG_MASK)) return "SYN|ACK";
+//     else{
+//         printf("event日志: getFlagstr标志位获取错误\n");
+//         exit(-1);
+//     }
+// }
+
 FILE* getEventlog(){    // 返回将要写入的日志文件
     char hostname[8];
     gethostname(hostname, 8);

@@ -48,10 +48,14 @@ bool TIMEOUT_FLAG;
 // 定义最大包长 防止IP层分片
 #define MAX_DLEN 1375 	// 最大包内数据长度
 #define MAX_LEN 1400 	// 最大包长度
-// 最大窗口大小
-#define MAX_WINDOW_SIZE 32*MAX_DLEN // 比如最多放32个满载数据包
+
+// 最大发送窗口大小
+#define MAX_SWINDOW_SIZE 32*MAX_DLEN
+// 最大接收窗口大小
+#define MAX_RWINDOW_SIZE 32*MAX_DLEN
+
 // 最大发送和接收缓冲区大小
-#define MAX_SOCK_BUF_SIZE 50000*MAX_LEN	// 发送缓冲区和接收缓冲区的大小至少为 5000 个 MSS
+#define MAX_SOCK_BUF_SIZE 6000*MAX_LEN	// 发送缓冲区和接收缓冲区的大小至少为 5000 个 MSS
 
 // TCP socket 状态定义
 #define CLOSED 0
