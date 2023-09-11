@@ -74,6 +74,7 @@ bool TIMEOUT_FLAG;
 #define SLOW_START 0
 #define CONGESTION_AVOIDANCE 1
 #define FAST_RECOVERY 2
+#define TIMEOUT 3
 
 // 最短超时重传间隔 (200毫秒)
 #define TCP_RTO_MIN 200000
@@ -94,6 +95,7 @@ typedef struct {
   	struct itimerval timeout;		// 记录超时重传间隔---------------------------记录RTO
   	uint32_t rwnd; 		// 发送端接收窗口大小----拥塞窗口--------------------------流量控制
   	int window_status;	// 该窗口拥塞控制状态-------------------------------------拥塞控制
+	uint32_t cwnd;		// 拥塞窗口-----------------------------------------------拥塞控制
   	uint32_t ssthresh; 	// 拥塞阈值-----------------------------------------------拥塞控制
 } sender_window_t;
 

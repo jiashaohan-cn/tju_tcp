@@ -103,16 +103,16 @@ void close_log();       // 关闭
     getCurrentTime(),get_seq(pkt),get_ack(pkt),get_flags(pkt),get_plen(pkt)-get_hlen(pkt));\
 }
 
-#define _CWND_LOG_(sock) \
+#define _CWND_LOG_(sock,type) \
 {\
     fprintf(getEventlog(),"[%ld] [CWND] [type:%d size:%d]\n",\
-    getCurrentTime(),sock->window.wnd_send->window_status,sock->window.wnd_send->rwnd);\
+    getCurrentTime(),type,sock->window.wnd_send->cwnd);\
 }
 
 #define _RWND_LOG_(sock) \
 {\
     fprintf(getEventlog(),"[%ld] [RWND] [size:%d]\n",\
-    getCurrentTime(),MAX_SOCK_BUF_SIZE-sock->received_len);\
+    getCurrentTime(),MAX_SOCK_BUF_SIZE-sock->rwnd);\
 }
 
 #define _SWND_LOG_(sock) \
