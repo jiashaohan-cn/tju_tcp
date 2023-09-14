@@ -112,7 +112,7 @@ void close_log();       // 关闭
 #define _RWND_LOG_(sock) \
 {\
     fprintf(getEventlog(),"[%ld] [RWND] [size:%d]\n",\
-    getCurrentTime(),MAX_SOCK_BUF_SIZE-sock->rwnd);\
+    getCurrentTime(),sock->window.wnd_send->rwnd);\
 }
 
 #define _SWND_LOG_(sock) \
