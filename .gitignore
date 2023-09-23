@@ -1,12 +1,11 @@
 # 忽略程序生成的中间文件
 build/
-test/
 .vscode/
 
 # 两个event日志
 client.event.trace
 server.event.trace
+
+# 两个可执行程序
 client
 server
-handin.zip
-
