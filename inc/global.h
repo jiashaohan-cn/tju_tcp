@@ -12,11 +12,11 @@
 #include <stdbool.h>	// 使用 bool 类型
 #include <string.h>
 #include <unistd.h>
-#include "global.h"
 #include <pthread.h>
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include <signal.h>		// 使用 signal 函数
+
 
 #define SERVER_IP "172.17.0.3"
 #define CLIENT_IP "172.17.0.2"
@@ -77,6 +77,9 @@ bool TIMEOUT_FLAG;
 
 // 最短超时重传间隔 (200毫秒)
 #define TCP_RTO_MIN 200000
+
+// 求二者之间较小值的辅助函数
+#define min(x,y) ((x<y)?(x):(y))    // 宏定义 min() 函数
 
 // TCP 发送窗口
 // 注释的内容如果想用就可以用 不想用就删掉 仅仅提供思路和灵感
